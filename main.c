@@ -8,6 +8,7 @@
 #include "./constants.h"
 
 #define NUM_BALLS 10
+#define NUM_GENES 25
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
@@ -21,11 +22,11 @@ typedef struct {
 
 typedef struct {
 	position position;
-	float x_movement;
-	float y_movement;
 	float width;
 	float height;
 	float last_changed_direction;
+	int current_movement_index;
+	position movements[NUM_GENES];
 } ball;
 
 ball balls[NUM_BALLS];
@@ -84,16 +85,24 @@ float float_rand(float min, float max) {
     return min + scale * ( max - min );
 }
 
+void setup_ball_movements(position movements[]) {
+	for (int i = 0; i < NUM_GENES; i++) {
+		movements[i].x = float_rand(-1, 1) * 100;
+		movements[i].y = float_rand(-1, 1) * 100;
+		printf("%f, %f\n", movements[i].x, movements[i].y);
+	}
+	printf("\n\n");
+}
 
 void setup() {
 	for (int i = 0; i < NUM_BALLS; i++) {
 		balls[i].position.x = (float)WINDOW_WIDTH / 2;
-		balls[i].x_movement = 5;
 		balls[i].position.y = (float)WINDOW_HEIGHT / 2;
-		balls[i].y_movement = -6;
 		balls[i].width = 15;
 		balls[i].height = 15;
 		balls[i].last_changed_direction = 0.5f;
+		balls[i].current_movement_index = 0;
+		setup_ball_movements(balls[i].movements);
 	}
 }
 
@@ -102,12 +111,11 @@ void update_ball(ball *ball, float delta_time) {
 
 	if (ball->last_changed_direction < 0) {
 		ball->last_changed_direction = 0.5f;
-		ball->x_movement = float_rand(-1, 1) * 100;
-		ball->y_movement = float_rand(-1, 1) * 100;
+		ball->current_movement_index += 1;
 	}
 
-	ball->position.x = ball->position.x + ball->x_movement * delta_time; 
-	ball->position.y = ball->position.y + ball->y_movement * delta_time; 
+	ball->position.x += ball->movements[ball->current_movement_index].x * delta_time; 
+	ball->position.y += ball->movements[ball->current_movement_index].y * delta_time; 
 }
 
 void update() {
@@ -120,16 +128,19 @@ void update() {
 	last_frame_time = SDL_GetTicks();
 
 	for (int i = 0; i < NUM_BALLS; i++) {
+		if (balls[i].current_movement_index + 1 == NUM_GENES) {
+			break;
+		}
 		update_ball(&balls[i], delta_time);
 	}
 }
 
-void render_ball(ball ball) {
+void render_ball(ball *ball) {
 	SDL_Rect ball_rect = {
-		ball.position.x,
-		ball.position.y,
-		ball.width,
-		ball.height
+		ball->position.x,
+		ball->position.y,
+		ball->width,
+		ball->height
 	};
 
 	SDL_SetRenderDrawColor(renderer, 123, 72, 12, 255);
@@ -141,7 +152,7 @@ void render() {
 	SDL_RenderClear(renderer);
 	
 	for (int i = 0; i < NUM_BALLS; i++) {
-		render_ball(balls[i]);
+		render_ball(&balls[i]);
 	}
 
 	SDL_RenderPresent(renderer);
