@@ -2,6 +2,7 @@
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
@@ -14,11 +15,14 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 int game_is_running = FALSE;
 float last_frame_time = 0;
+int generations_count = 5;
 
 typedef struct {
 	float x;
 	float y;
 } position;
+
+position goal;
 
 typedef struct {
 	position position;
@@ -27,6 +31,7 @@ typedef struct {
 	float last_changed_direction;
 	int current_movement_index;
 	position movements[NUM_GENES];
+	float fitness;
 } ball;
 
 ball balls[NUM_BALLS];
@@ -95,6 +100,9 @@ void setup_ball_movements(position movements[]) {
 }
 
 void setup() {
+	goal.x = WINDOW_WIDTH / 2;
+	goal.y = (int)WINDOW_HEIGHT / 2;
+
 	for (int i = 0; i < NUM_BALLS; i++) {
 		balls[i].position.x = (float)WINDOW_WIDTH / 2;
 		balls[i].position.y = (float)WINDOW_HEIGHT / 2;
@@ -118,6 +126,17 @@ void update_ball(ball *ball, float delta_time) {
 	ball->position.y += ball->movements[ball->current_movement_index].y * delta_time; 
 }
 
+float calc_fitness(int x, int y) {
+	return 1 - (hypot(goal.x - x, goal.y - y) / WINDOW_WIDTH);
+}
+
+void next_gen() {
+	for (int i = 0; i < NUM_BALLS; i++) {
+		balls[i].fitness = calc_fitness(balls[i].position.x, balls[i].position.y);
+	}
+	printf("\n");
+}
+
 void update() {
 	// A method to cap the framerate (usually, useless if using delta_time);
 	// while (!SDL_TICKS_PASSED(SDL_GetTicks(), last_frame_time + FRAME_TARGET_TIME));
@@ -129,6 +148,7 @@ void update() {
 
 	for (int i = 0; i < NUM_BALLS; i++) {
 		if (balls[i].current_movement_index + 1 == NUM_GENES) {
+			next_gen();
 			break;
 		}
 		update_ball(&balls[i], delta_time);
@@ -154,6 +174,16 @@ void render() {
 	for (int i = 0; i < NUM_BALLS; i++) {
 		render_ball(&balls[i]);
 	}
+
+	SDL_Rect goal_rect = {
+		goal.x,
+		goal.y,
+		20,
+		20
+	};
+
+	SDL_SetRenderDrawColor(renderer, 12, 42, 12, 255);
+	SDL_RenderFillRect(renderer, &goal_rect); 
 
 	SDL_RenderPresent(renderer);
 }
