@@ -1,21 +1,32 @@
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_surface.h>
 #include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_video.h>
+#include <SDL2/SDL_ttf.h>
 #include <math.h>
+#include <sodium/core.h>
+#include <sodium/randombytes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <sodium.h>
 #include <SDL2/SDL.h>
 #include "./constants.h"
 
-#define NUM_BALLS 10
-#define NUM_GENES 25
+#define NUM_BALLS 100
+#define NUM_GENES 20
+#define MUTATION_RATE 0.05
+
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
+SDL_Texture *texture, *text_texture;
+TTF_Font* font;
 int game_is_running = FALSE;
 float last_frame_time = 0;
-int generations_count = 5;
+int generations_count = 1;
+float one_direction_move_duration = 0.5f;
 
 typedef struct {
 	float x;
@@ -35,6 +46,8 @@ typedef struct {
 } ball;
 
 ball balls[NUM_BALLS];
+ball candidates[NUM_BALLS * 100];
+int candidates_len = 0;
 
 int initialize_window() {
 	if (SDL_Init(SDL_INIT_EVERYTHING)) {
@@ -66,7 +79,6 @@ int initialize_window() {
 		return FALSE;
 	}
 
-	printf("All good\n");
 	return TRUE;
 }
 
@@ -85,56 +97,96 @@ void process_input() {
 	}
 }
 
-float float_rand(float min, float max) {
-    float scale = rand() / (float) RAND_MAX;
-    return min + scale * ( max - min );
+float float_rand(int min, int max) {
+	unsigned int r = randombytes_random();
+	float normalized = (float) r / (float) UINT32_MAX;
+	return min + normalized * (max - min);
 }
 
 void setup_ball_movements(position movements[]) {
 	for (int i = 0; i < NUM_GENES; i++) {
 		movements[i].x = float_rand(-1, 1) * 100;
 		movements[i].y = float_rand(-1, 1) * 100;
-		printf("%f, %f\n", movements[i].x, movements[i].y);
 	}
-	printf("\n\n");
 }
 
-void setup() {
-	goal.x = WINDOW_WIDTH / 2;
-	goal.y = (int)WINDOW_HEIGHT / 2;
+void setup(bool setup_random_movements) {
+	goal.x = WINDOW_WIDTH - 20;
+	goal.y = (int)(WINDOW_HEIGHT / 2);
 
 	for (int i = 0; i < NUM_BALLS; i++) {
 		balls[i].position.x = (float)WINDOW_WIDTH / 2;
 		balls[i].position.y = (float)WINDOW_HEIGHT / 2;
 		balls[i].width = 15;
 		balls[i].height = 15;
-		balls[i].last_changed_direction = 0.5f;
+		balls[i].last_changed_direction = one_direction_move_duration;
 		balls[i].current_movement_index = 0;
-		setup_ball_movements(balls[i].movements);
+		if (setup_random_movements) {
+			setup_ball_movements(balls[i].movements);
+		}
 	}
 }
 
 void update_ball(ball *ball, float delta_time) {
 	ball->last_changed_direction -= delta_time;
 
-	if (ball->last_changed_direction < 0) {
-		ball->last_changed_direction = 0.5f;
-		ball->current_movement_index += 1;
-	}
-
 	ball->position.x += ball->movements[ball->current_movement_index].x * delta_time; 
 	ball->position.y += ball->movements[ball->current_movement_index].y * delta_time; 
+	
+	if (ball->last_changed_direction < 0) {
+		ball->last_changed_direction = one_direction_move_duration;
+		ball->current_movement_index += 1;
+	}
 }
 
 float calc_fitness(int x, int y) {
 	return 1 - (hypot(goal.x - x, goal.y - y) / WINDOW_WIDTH);
 }
 
+void crossover(int idx) {
+	int mom_idx = randombytes_uniform(candidates_len+1);
+	int dad_idx = randombytes_uniform(candidates_len+1);
+	for (int i = 0; i < NUM_GENES; i++) {
+		if (i % 2 == 0) {
+			balls[idx].movements[i] = candidates[mom_idx].movements[i];
+		}
+		else {
+			balls[idx].movements[i] = candidates[dad_idx].movements[i];
+		}
+	}
+
+}
+
+void mutate(int idx) {
+	for (int i = 0; i < NUM_GENES; i++) {
+		if (float_rand(0, 1) < MUTATION_RATE) {
+			printf("mutated");
+			balls[idx].movements[i].x = float_rand(-1, 1) * 100;
+			balls[idx].movements[i].y = float_rand(-1, 1) * 100;
+		}
+	}
+}
+
 void next_gen() {
+	int first_empty_idx = 0;
 	for (int i = 0; i < NUM_BALLS; i++) {
 		balls[i].fitness = calc_fitness(balls[i].position.x, balls[i].position.y);
+		int rounded_fintess = (int)round(balls[i].fitness * 100);
+		for (int j = first_empty_idx; j < first_empty_idx + rounded_fintess; j++) {
+			candidates[j] = balls[i];
+			candidates_len += 1;
+		}
+		first_empty_idx += rounded_fintess;
 	}
-	printf("\n");
+
+	setup(false);
+	for (int i = 0; i < NUM_BALLS; i++) {
+		crossover(i);
+		mutate(i);
+	}
+	generations_count += 1;
+
+	candidates_len = 0;
 }
 
 void update() {
@@ -147,12 +199,26 @@ void update() {
 	last_frame_time = SDL_GetTicks();
 
 	for (int i = 0; i < NUM_BALLS; i++) {
-		if (balls[i].current_movement_index + 1 == NUM_GENES) {
-			next_gen();
-			break;
-		}
 		update_ball(&balls[i], delta_time);
 	}
+	if (balls[0].current_movement_index == NUM_GENES) {
+		next_gen();
+	}
+}
+
+void render_text(char text[]) {
+	SDL_Rect dest;
+	SDL_Color foreground = { 234, 12, 42 };
+	SDL_Surface* text_surface = TTF_RenderText_Solid(font, text, foreground);
+	text_texture = SDL_CreateTextureFromSurface(renderer, text_surface);
+	dest.x = 10;
+	dest.y = 10;
+	dest.w = text_surface->w;
+	dest.h = text_surface->h;
+	SDL_RenderCopy(renderer, text_texture, NULL, &dest);
+
+	SDL_DestroyTexture(text_texture);
+	SDL_FreeSurface(text_surface);
 }
 
 void render_ball(ball *ball) {
@@ -185,6 +251,11 @@ void render() {
 	SDL_SetRenderDrawColor(renderer, 12, 42, 12, 255);
 	SDL_RenderFillRect(renderer, &goal_rect); 
 
+	SDL_SetRenderDrawColor(renderer, 12, 42, 12, 255);
+	char gen_text[3];
+	sprintf(gen_text, "%d", generations_count);
+	render_text(gen_text);
+
 	SDL_RenderPresent(renderer);
 }
 
@@ -197,9 +268,19 @@ void destroy_window() {
 
 int main() {
 	game_is_running = initialize_window();
+	setup(true);
+	if (TTF_Init() < 0) {
+		fprintf(stderr, "Error initializing SDL_ttf.\n");
+	}
+	font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24);
+	if (!font) {
+		fprintf(stderr, "Error initializing font.\n");
+	}
 
-	setup();
-
+	if (sodium_init() < 0) {
+		// panic! the library couldn't be initialized, it is not safe to use
+		return 0;
+	}
 	while (game_is_running) {
 		process_input();
 		update();
